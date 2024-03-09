@@ -72,10 +72,10 @@ void setup() {
 
   // StickCPlus's SD HAT
   // https://booth.pm/ja/items/2385035
-//  SPI_EXT.begin(G0, G36, G26);
-  SPI_EXT.begin(G0, G36, G26, -1);
-//  SPI_EXT.begin(G0, G36, G26, 2); // dummy CS for G2
-  if (!SD.begin(-1, SPI_EXT, 15000000)){
+//  SPI_EXT.begin(G0, G36, G26, -1);
+  SPI_EXT.begin(G0, G36, G26, 2); // dummy CS for G2
+//  if (!SD.begin(-1, SPI_EXT, 15000000)){
+  if (!SD.begin(2, SPI_EXT, 15000000)){ // dummy CS for G2
     while(1){
       digitalWrite(PIN_LED, 0); delay(100);
       digitalWrite(PIN_LED, 1); delay(100);
