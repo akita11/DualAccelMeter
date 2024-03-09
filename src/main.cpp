@@ -1,5 +1,4 @@
 #include <Arduino.h>
-//#include "IMU_6886.h"
 #include <M5Unified.h>
 #include "TCA9548.h"
 #include "ntp.h"
@@ -12,9 +11,9 @@
 SPIClass SPI_EXT;
 
 // ToDo:
-// - NTP WiFi接続情報をSDから
-// - SD保存
-// - M5.Imuデータ取得
+// v NTP WiFi接続情報をSDから
+// v SD保存
+// v M5.Imuデータ取得
 // - PaHubでの複数取得@250Hz
 
 TCA9548 PaHub2(0x70); // PaHub2 with address=0x70
@@ -26,11 +25,11 @@ TCA9548 PaHub2(0x70); // PaHub2 with address=0x70
 // https://github.com/m5stack/M5Stack/blob/master/examples/Unit/PaHUB_TCA9548A/PaHUB_TCA9548A.ino?fbclid=IwAR35i5FBEDKPZBe5ovpPSaczyekhg507NC6amWv-EwJnkGQSw4HOd5b0Qbc
 
 #define SAMPLE_FREQ 250
-#define LOG_FILENAME "log.csv"
+#define LOG_FILENAME "/log.csv"
 
 Ticker ticker;
 uint8_t w = 0;
-uint8_t fRun = 1;
+uint8_t fRun = 0;
 File fp;
 
 void IRAM_ATTR onTicker(){
@@ -47,8 +46,9 @@ void IRAM_ATTR onTicker(){
     fp.printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", x0, y0, z0, x1, y1, z1);
     w++;
 
-    if (w == SAMPLE_FREQ /4 ){
+    if (w == SAMPLE_FREQ){ // display every 1 sec
       w = 0;
+      M5.Display.clear();
       M5.Display.setCursor(0, 0);
       M5.Display.printf("%02d%02d%02d %02d%02d%02d ", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds);
       M5.Display.setCursor(10, 30); M5.Display.printf("%.2f %.2f %.2f", x0, y0, z0);
@@ -68,17 +68,20 @@ void setup() {
 
   M5.Display.setRotation(1);
   M5.Lcd.setFont(&fonts::DejaVu24);
-  pinMode(G10, OUTPUT); digitalWrite(G10, 1); // StickC's red LED
+  pinMode(PIN_LED, OUTPUT); digitalWrite(PIN_LED, 0); // StickC's red LED
 
   // StickCPlus's SD HAT
   // https://booth.pm/ja/items/2385035
+//  SPI_EXT.begin(G0, G36, G26);
   SPI_EXT.begin(G0, G36, G26, -1);
+//  SPI_EXT.begin(G0, G36, G26, 2); // dummy CS for G2
   if (!SD.begin(-1, SPI_EXT, 15000000)){
     while(1){
-      digitalWrite(G10, 0); delay(100);
-      digitalWrite(G10, 1); delay(100);
+      digitalWrite(PIN_LED, 0); delay(100);
+      digitalWrite(PIN_LED, 1); delay(100);
     }
   }
+  M5.Display.fillRect(200, 0, 240, 135, RED);
 }
 
 void loop() {
@@ -88,6 +91,14 @@ void loop() {
       fRun = 1;
       M5.Display.fillRect(200, 0, 240, 135, BLACK);
       fp = SD.open(LOG_FILENAME, "a");
+      if (!fp){
+        // fast LED flash if log file open error
+        for (uint8_t i = 0; i < 5; i++){
+          digitalWrite(PIN_LED, 0); delay(100);
+          digitalWrite(PIN_LED, 1); delay(100);
+        }
+        digitalWrite(PIN_LED, 0); delay(50);
+      }
       ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTicker);
     }
     else{
@@ -99,6 +110,7 @@ void loop() {
   }
 
   if (M5.BtnB.wasClicked()){
+    printf("NTP adjust\n");
     NTPadjust();
   }
 }

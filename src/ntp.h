@@ -18,4 +18,6 @@
 #define SNTP_ENABLED 0
 #endif
 
+#define PIN_LED 19 // StickCPlus2's red LED
+
 extern void NTPadjust();
