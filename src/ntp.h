@@ -2,7 +2,8 @@
 #include "esp_event_loop.h"
 #include "nvs_flash.h"
 #include "mbedtls/md.h"
-#include "SD.h"
+//#include "SD.h"
+#include "SdFat.h"
 
 #include "time.h"
 #include <WiFi.h>
@@ -21,3 +22,9 @@
 #define PIN_LED 19 // StickCPlus2's red LED
 
 extern void NTPadjust();
+
+//File fp; // for SD.h
+//SdFile32 fp; // for SdFat.h
+extern File32 fp; // for SdFat.h
+extern SdFat32 sd; // for SdFat.h
+
