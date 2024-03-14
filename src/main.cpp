@@ -43,32 +43,22 @@ uint8_t dp = 0;
 
 m5::rtc_datetime_t dt;
 
+uint8_t fTrigger = 0;
+
 void IRAM_ATTR onTicker(){
   if (fRun == 1){
-    PaHub2.selectChannel(0);
-    M5.Imu.getAccel(&(ax0[bank][dp]), &(ay0[bank][dp]), &(az0[bank][dp]));
-    PaHub2.selectChannel(1);
-    M5.Imu.getAccel(&(ax1[bank][dp]), &(ay1[bank][dp]), &(az1[bank][dp]));
+    fTrigger = 1;
 //    auto dt = M5.Rtc.getDateTime();
-    M5.Rtc.getDateTime(&dt);
-    // 210-218 sample /s 
-    //    fp.printf("%02d%02d%02d,%02d%02d%02d,", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds);
-    //    fp.printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", x0, y0, z0, x1, y1, z1);
-//    fp.printf("%02d%02d%02d,%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds, ax0, ay0, az0, ax1, ay1, az1);
-//    fp.printf("%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.time.hours, dt.time.minutes, dt.time.seconds, ax0, ay0, az0, ax1, ay1, az1);
-//    fp.printf("%02d%02d%02d\n", dt.time.hours, dt.time.minutes, dt.time.seconds);
     w++;
     if (w == SAMPLE_FREQ){ // display every 1 sec
+      M5.Rtc.getDateTime(&dt);
       w = 0;
       M5.Display.fillRect(0, 0, 230, 100, BLACK);
       M5.Display.setCursor(0, 0);
       M5.Display.printf("%02d%02d%02d %02d%02d%02d ", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds);
-//      M5.Display.setCursor(10, 30); M5.Display.printf("%.2f %.2f %.2f", ax0, ay0, az0);
-//      M5.Display.setCursor(10, 50); M5.Display.printf("%.2f %.2f %.2f", ax1, ay1, az1);
       M5.Display.setCursor(10, 30); M5.Display.printf("%.2f %.2f %.2f", ax0[bank][dp], ay0[bank][dp], az0[bank][dp]);
       M5.Display.setCursor(10, 50); M5.Display.printf("%.2f %.2f %.2f", ax1[bank][dp], ay1[bank][dp], az1[bank][dp]);
     }
-    dp++;
   }
 }
 
@@ -80,20 +70,19 @@ void drawStatus(uint8_t f)
 }
 
 void setup() {
-//  Wire.setClock(400000); // I2C 400kHz
-//  Wire.setClock(200000); // I2C 200kHz
-//  Wire.setClock(100000); // I2C 100kHz
   auto cfg = M5.config();
   cfg.external_imu = true;
   cfg.internal_imu = false;
-  Wire.setClock(100000); // I2C 100kHz
+  cfg.internal_spk = false;
+  cfg.internal_mic = false;
+  // I2C clock is defined in Unified/src/utility/IMU_Base.hpp
+  M5.begin(cfg);
   PaHub2.enableChannel(0);
-  Wire.setClock(100000); // I2C 100kHz
   M5.begin(cfg); // IMU-#0 init
-  Wire.setClock(100000); // I2C 100kHz
   PaHub2.enableChannel(1);
-  Wire.setClock(100000); // I2C 100kHz
   M5.begin(cfg); // IMU-#1 init
+
+  PaHub2.selectChannel(0);
 
 //  M5.Display.setRotation(1); for StickC
   M5.Lcd.setFont(&fonts::DejaVu24);
@@ -153,6 +142,15 @@ void loop() {
     }
   }
 
+  if (fTrigger == 1){
+    PaHub2.selectChannel(0);
+    M5.Imu.getAccel(&(ax0[bank][dp]), &(ay0[bank][dp]), &(az0[bank][dp]));
+    PaHub2.selectChannel(1);
+    M5.Imu.getAccel(&(ax1[bank][dp]), &(ay1[bank][dp]), &(az1[bank][dp]));
+    fTrigger = 0;
+    dp++;
+  }
+
   if (fRun == 1){
     if (dp == N){
       uint8_t bank_r = bank;
@@ -160,13 +158,12 @@ void loop() {
       bank = 1 - bank;
       for (uint8_t i = 0; i < N; i++){
         fp.printf("%02d%02d%02d,%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds, ax0[bank_r][i], ay0[bank_r][i], az0[bank_r][i], ax1[bank_r][i], ay1[bank_r][i], az1[bank_r][i]);
-//        fp.printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", ax0[bank_r][i], ay0[bank_r][i], az0[bank_r][i], ax1[bank_r][i], ay1[bank_r][i], az1[bank_r][i]);
       }
     }
 
   }
 
-  if (M5.BtnB.wasClicked()){
+  if (M5.BtnC.wasDoubleClicked()){
     printf("NTP adjust\n");
     NTPadjust();
   }
