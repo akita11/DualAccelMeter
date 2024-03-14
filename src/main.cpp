@@ -24,7 +24,8 @@ TCA9548 PaHub2(0x70); // PaHub2 with address=0x70
 // https://shop.m5stack.com/products/i2c-hub-1-to-6-expansion-unit-pca9548apw?_pos=1&_sid=9ea0dfe51&_ss=r&variant=40724626833580
 // https://github.com/m5stack/M5Stack/blob/master/examples/Unit/PaHUB_TCA9548A/PaHUB_TCA9548A.ino?fbclid=IwAR35i5FBEDKPZBe5ovpPSaczyekhg507NC6amWv-EwJnkGQSw4HOd5b0Qbc
 
-#define SAMPLE_FREQ 250
+//#define SAMPLE_FREQ 250
+#define SAMPLE_FREQ 100
 #define LOG_FILENAME "/log.csv"
 
 Ticker ticker;
@@ -34,22 +35,27 @@ uint8_t fRun = 0;
 File32 fp; // for SdFat.h
 SdFat32 sd; // for SdFat.h
 
+//float ax0, ay0, az0, ax1, ay1, az1;
+#define N 10
+float ax0[2][N], ay0[2][N], az0[2][N], ax1[2][N], ay1[2][N], az1[2][N];
+uint8_t bank = 0;
+uint8_t dp = 0;
+
+m5::rtc_datetime_t dt;
+
 void IRAM_ATTR onTicker(){
-  float x0, y0, z0, x1, y1, z1;
   if (fRun == 1){
-//    x0 = 0.1; y0 = 0.2; z0 = 0.3; x1 = 0.4; y1 = 0.5; z1 = 0.6;
     PaHub2.selectChannel(0);
-    M5.Imu.getAccel(&x0, &y0, &z0);
+    M5.Imu.getAccel(&(ax0[bank][dp]), &(ay0[bank][dp]), &(az0[bank][dp]));
     PaHub2.selectChannel(1);
-    M5.Imu.getAccel(&x1, &y1, &z1);
-    // x0 = (float)random(1000) / 1000.0; y0 = (float)random(1000) / 1000.0; z0 = (float)random(1000) / 1000.0;
-    // x1 = (float)random(1000) / 1000.0; y1 = (float)random(1000) / 1000.0; z1 = (float)random(1000) / 1000.0;
-    auto dt = M5.Rtc.getDateTime();
+    M5.Imu.getAccel(&(ax1[bank][dp]), &(ay1[bank][dp]), &(az1[bank][dp]));
+//    auto dt = M5.Rtc.getDateTime();
+    M5.Rtc.getDateTime(&dt);
     // 210-218 sample /s 
     //    fp.printf("%02d%02d%02d,%02d%02d%02d,", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds);
     //    fp.printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", x0, y0, z0, x1, y1, z1);
-    //    fp.printf("%02d%02d%02d,%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds, x0, y0, z0, x1, y1, z1);
-    fp.printf("%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.time.hours, dt.time.minutes, dt.time.seconds, x0, y0, z0, x1, y1, z1);
+//    fp.printf("%02d%02d%02d,%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds, ax0, ay0, az0, ax1, ay1, az1);
+//    fp.printf("%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.time.hours, dt.time.minutes, dt.time.seconds, ax0, ay0, az0, ax1, ay1, az1);
 //    fp.printf("%02d%02d%02d\n", dt.time.hours, dt.time.minutes, dt.time.seconds);
     w++;
     if (w == SAMPLE_FREQ){ // display every 1 sec
@@ -57,9 +63,12 @@ void IRAM_ATTR onTicker(){
       M5.Display.fillRect(0, 0, 230, 100, BLACK);
       M5.Display.setCursor(0, 0);
       M5.Display.printf("%02d%02d%02d %02d%02d%02d ", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds);
-      M5.Display.setCursor(10, 30); M5.Display.printf("%.2f %.2f %.2f", x0, y0, z0);
-      M5.Display.setCursor(10, 50); M5.Display.printf("%.2f %.2f %.2f", x1, y1, z1);
+//      M5.Display.setCursor(10, 30); M5.Display.printf("%.2f %.2f %.2f", ax0, ay0, az0);
+//      M5.Display.setCursor(10, 50); M5.Display.printf("%.2f %.2f %.2f", ax1, ay1, az1);
+      M5.Display.setCursor(10, 30); M5.Display.printf("%.2f %.2f %.2f", ax0[bank][dp], ay0[bank][dp], az0[bank][dp]);
+      M5.Display.setCursor(10, 50); M5.Display.printf("%.2f %.2f %.2f", ax1[bank][dp], ay1[bank][dp], az1[bank][dp]);
     }
+    dp++;
   }
 }
 
@@ -71,14 +80,20 @@ void drawStatus(uint8_t f)
 }
 
 void setup() {
+//  Wire.setClock(400000); // I2C 400kHz
+//  Wire.setClock(200000); // I2C 200kHz
+//  Wire.setClock(100000); // I2C 100kHz
   auto cfg = M5.config();
   cfg.external_imu = true;
   cfg.internal_imu = false;
-  M5.begin(cfg);
+  Wire.setClock(100000); // I2C 100kHz
   PaHub2.enableChannel(0);
-  delay(100);
+  Wire.setClock(100000); // I2C 100kHz
+  M5.begin(cfg); // IMU-#0 init
+  Wire.setClock(100000); // I2C 100kHz
   PaHub2.enableChannel(1);
-  Wire.setClock(400000); // I2C 400kHz
+  Wire.setClock(100000); // I2C 100kHz
+  M5.begin(cfg); // IMU-#1 init
 
 //  M5.Display.setRotation(1); for StickC
   M5.Lcd.setFont(&fonts::DejaVu24);
@@ -136,6 +151,19 @@ void loop() {
       fp.close();
       ticker.detach();
     }
+  }
+
+  if (fRun == 1){
+    if (dp == N){
+      uint8_t bank_r = bank;
+      dp = 0;
+      bank = 1 - bank;
+      for (uint8_t i = 0; i < N; i++){
+        fp.printf("%02d%02d%02d,%02d%02d%02d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", dt.date.year % 100, dt.date.month, dt.date.date, dt.time.hours, dt.time.minutes, dt.time.seconds, ax0[bank_r][i], ay0[bank_r][i], az0[bank_r][i], ax1[bank_r][i], ay1[bank_r][i], az1[bank_r][i]);
+//        fp.printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", ax0[bank_r][i], ay0[bank_r][i], az0[bank_r][i], ax1[bank_r][i], ay1[bank_r][i], az1[bank_r][i]);
+      }
+    }
+
   }
 
   if (M5.BtnB.wasClicked()){
