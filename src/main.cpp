@@ -9,14 +9,24 @@
 // 250Hz, UART, 2byte/axis=6byte/IMU=12byte/2IMU+4byte(header)=16byte -> 4000byte/s
 // 115200bps = 11520byte/s 
 
+// note: I2C_CLK_FREQ_MAX is defined -1 in include/hal/i2c_types.h
+
 #define SAMPLE_FREQ 250
 
-#define I2C_ADDR1 0x68 // IMU#1
-#define I2C_ADDR2 0x69 // IMU#2
+#define I2C_ADDR_IMU0 0x68 // IMU#1
+#define I2C_ADDR_IMU1 0x69 // IMU#2
+#define I2C_CLK_FREQ 400000 // 400kHz
 
+float ax[2], ay[2], az[2];
+float conv_acc(uint8_t dh, uint8_t dl){
+	int16_t d = (dh << 8) | dl;
+	if (d & 0x8000) d = -(~d & 0x7fff); else d = d & 0x7fff;
+	return (float)d / 16384.0f;
+}
 Ticker ticker;
-uint8_t w = 0;
 uint8_t fRun = 0;
+uint32_t w = 0;
+uint8_t buf[10];
 
 void IRAM_ATTR onTicker()
 {
@@ -38,6 +48,33 @@ void drawStatus(uint8_t f)
     M5.Display.fillRect(230, 0, 240, 240, GREEN);
 }
 
+#define writeRegB(i2c_addr, reg_addr, data) M5.Ex_I2C.writeRegister8(i2c_addr, reg_addr, data, I2C_CLK_FREQ)
+#define writeReg(i2c_addr, reg_addr, data, len) M5.Ex_I2C.writeRegister(i2c_addr, reg_addr, data, len, I2C_CLK_FREQ)
+#define readRegB(i2c_addr, reg_addr) M5.Ex_I2C.readRegister8(i2c_addr, reg_addr, I2C_CLK_FREQ)
+#define readReg(i2c_addr, reg_addr, data, len) M5.Ex_I2C.readRegister(i2c_addr, reg_addr, data, len, I2C_CLK_FREQ)
+
+void IMUinit(uint8_t i2c_addr)
+{
+	uint8_t index = 0;
+  uint8_t addr_array[2] = { (uint8_t)((index >> 1) & 0x0F), (uint8_t)(index >> 5) };
+
+	// IMU init sequence
+//	printf("CHIP_ID(%02x) : %02x\n", readRegB(I2C_ADDR_IMU1, 0x00)); // CHIP_ID(0x00) = 0x24
+	writeRegB(i2c_addr, 0x7c, 0x00); // disable adv.power save
+	delayMicroseconds(450);
+	writeRegB(i2c_addr, 0x59, 0x00); // prepare init
+
+	writeReg(i2c_addr, 0x5b, addr_array, 2);
+  writeReg(i2c_addr, 0x5e, (uint8_t *)bmi270_config_file, sizeof(bmi270_config_file));
+	writeRegB(i2c_addr, 0x59, 0x01);
+	while(readRegB(i2c_addr, 0x21) != 0x01); // INTERNAL_STATUS(0x21), 0x01=init ok
+
+	writeRegB(i2c_addr, 0x7d, 0x04); // enable acc
+	writeRegB(i2c_addr, 0x40, 0xaa); // ODR=400Hz, bwp=normal, filer=performance opt.
+	writeRegB(i2c_addr, 0x7c, 0x02); // disable adv. power save, enable fifo wakeup
+	writeRegB(i2c_addr, 0x41, 0x00); // range : +-2g
+}
+
 void setup()
 {
   auto cfg = M5.config();
@@ -51,45 +88,29 @@ void setup()
   M5.Ex_I2C.begin();
   M5.Lcd.setFont(&fonts::DejaVu24);
 
-  M5.Lcd.println("I2C device is ready.");
+  M5.Display.setCursor(0, 0); M5.Display.printf("IMU init #0...");
+	IMUinit(I2C_ADDR_IMU0);
+  M5.Display.setCursor(0, 0); M5.Display.printf("IMU init #1...");
+	IMUinit(I2C_ADDR_IMU1);
 
-  M5.Display.setCursor(10, 30);
+	M5.Display.clear();
+  M5.Display.setCursor(0, 0);
 	M5.Display.printf("IMU test");
 
-//	static constexpr const std::uint8_t INIT_ADDR_0             = 0x5B;
-//	static constexpr const std::uint8_t INIT_ADDR_1             = 0x5C;
-//	static constexpr const std::uint8_t INIT_DATA_ADDR          = 0x5E;
-
-	uint8_t index = 0;
-  uint8_t addr_array[2] = {
-      (uint8_t)((index >> 1) & 0x0F),
-      (uint8_t)(index >> 5)
-    };
-
-//	M5.Ex_I2C.writeRegister( I2C_ADDR1, 0x5b, addr_array, 2, I2C_CLK_FREQ_MAX);
-//  M5.Ex_I2C.writeRegister( I2C_ADDR1, 0x5e, (uint8_t *)bmi270_config_file, sizeof(bmi270_config_file), I2C_CLK_FREQ_MAX);
-
-	// IMU init sequence
-	// write_reg(0x7c, 0x00); // disable adv.power save
-	// wait 450us
-	// write_reg(0x59, 0x00); // prepare init
-	// prepare init_array[] & burst_write from 0x5e
-	// write_reg(0x59, 0x01); // complete init
-
-	// read_reg(0x21) == 1 -> OK
-	// write_reg(0x7d, 0x04); enable acc
-	// write_reg(0x40, 0xaa); // ODR=400Hz, bwp=normal, filer=performance opt. 
-	// write_reg(0x7c, 0x02); // disable adv. power save, enable fifo wakeup
-	// read acc
-
+//  ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTicker);
+//  ticker.detach();
 }
 
 void loop()
 {
-	// CHIP_ID(0x00) = 0x24
-  printf("%02x\n", M5.Ex_I2C.readRegister8(I2C_ADDR1, 0x00, I2C_CLK_FREQ_MAX));
-	delay(1000);
-//  ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTicker);
-//  ticker.detach();
+	readReg(I2C_ADDR_IMU0, 0x0c, buf, 6); // accxL, accxH, accyL, accyH, acczL, acczH
+	ax[0] = conv_acc(buf[1], buf[0]);
+	ay[0] = conv_acc(buf[3], buf[2]);
+	az[0] = conv_acc(buf[5], buf[4]);
+	readReg(I2C_ADDR_IMU1, 0x0c, buf, 6); // accxL, accxH, accyL, accyH, acczL, acczH
+	ax[1] = conv_acc(buf[1], buf[0]);
+	ay[1] = conv_acc(buf[3], buf[2]);
+	az[1] = conv_acc(buf[5], buf[4]);
+	printf("%f %f %f / %f %f %f\n", ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
 }
 
