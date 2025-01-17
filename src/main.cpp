@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <Ticker.h>
+#include <FastLED.h>
 #include "bmi270_config.h"
 
 // IMU Unit
@@ -10,6 +11,10 @@
 // 115200bps = 11520byte/s 
 
 // note: I2C_CLK_FREQ_MAX is defined -1 in include/hal/i2c_types.h
+
+#define NUM_LEDS 1
+#define LED_DATA_PIN 35
+static CRGB leds[NUM_LEDS];
 
 #define SAMPLE_FREQ 250
 
@@ -88,12 +93,14 @@ void IRAM_ATTR onTicker()
 void setMeasure(uint8_t f)
 {
 	if (f == 1){
-		M5.Display.fillRect(230, 0, 240, 240, GREEN);
-	  ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTicker);
+//		M5.Display.fillRect(230, 0, 240, 240, RED);
+		leds[0] = CRGB::Orange; FastLED.show();
+		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTicker);
 	}
 	else{
  		ticker.detach();
-		M5.Display.fillRect(230, 0, 240, 240, RED);
+//		M5.Display.fillRect(230, 0, 240, 240, GREEN);
+		leds[0] = CRGB::Green; FastLED.show();
 	}
 }
 
@@ -108,6 +115,15 @@ void setup()
 	// I2C clock is defined in Unified/src/utility/imu/IMU_Base.hpp
 	M5.begin(cfg);
 	M5.Ex_I2C.begin();
+
+	FastLED.addLeds<WS2811, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
+	FastLED.setBrightness(1);
+	leds[0] = CRGB::Yellow; FastLED.show();
+	IMUinit(I2C_ADDR_IMU0);
+	IMUinit(I2C_ADDR_IMU1);
+	leds[0] = CRGB::Green; FastLED.show();
+
+/*
 	M5.Display.setFont(&fonts::DejaVu24);
 
 	M5.Display.setCursor(0, 0); M5.Display.printf("IMU init #0...");
@@ -118,7 +134,7 @@ void setup()
 	M5.Display.clear();
 	M5.Display.setCursor(0, 0);
 	M5.Display.printf("Dual IMU @ 250Hz");
-
+*/
 	fRun = 0;
 	setMeasure(fRun);
 }
@@ -126,9 +142,11 @@ void setup()
 void loop()
 {
 	M5.update();
-
+/*
 	auto t = M5.Touch.getDetail();
 	if (t.isPressed()){
+	*/
+	if (M5.BtnA.wasPressed()){
 		fRun = 1 - fRun;
 		setMeasure(fRun);
 		delay(500);
