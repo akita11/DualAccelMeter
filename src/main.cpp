@@ -53,6 +53,7 @@ void drawStatus(uint8_t f)
 #define readRegB(i2c_addr, reg_addr) M5.Ex_I2C.readRegister8(i2c_addr, reg_addr, I2C_CLK_FREQ)
 #define readReg(i2c_addr, reg_addr, data, len) M5.Ex_I2C.readRegister(i2c_addr, reg_addr, data, len, I2C_CLK_FREQ)
 
+// for BMI270
 void IMUinit(uint8_t i2c_addr)
 {
 	uint8_t index = 0;
