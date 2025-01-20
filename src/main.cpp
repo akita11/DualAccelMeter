@@ -95,13 +95,13 @@ void setMeasure(uint8_t f)
 {
 	if (f == 1){
 //		M5.Display.fillRect(230, 0, 240, 240, RED);
-		leds[0] = CRGB::Orange; FastLED.show();
+		leds[0] = CRGB(30, 30, 0); FastLED.show();
 		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTicker);
 	}
 	else{
  		ticker.detach();
 //		M5.Display.fillRect(230, 0, 240, 240, GREEN);
-		leds[0] = CRGB::Green; FastLED.show();
+		leds[0] = CRGB(0, 30, 0); FastLED.show();
 	}
 }
 
@@ -117,12 +117,14 @@ void setup()
 	M5.begin(cfg);
 	M5.Ex_I2C.begin();
 
-	FastLED.addLeds<WS2811, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
-	FastLED.setBrightness(1);
-	leds[0] = CRGB::Yellow; FastLED.show();
+	FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
+	FastLED.setBrightness(128);
+	FastLED.clear();
+
+	leds[0] = CRGB(30, 0, 0); FastLED.show();
 	IMUinit(I2C_ADDR_IMU0);
 	IMUinit(I2C_ADDR_IMU1);
-	leds[0] = CRGB::Green; FastLED.show();
+	leds[0] = CRGB(0, 30, 0); FastLED.show();
 
 /*
 	M5.Display.setFont(&fonts::DejaVu24);
