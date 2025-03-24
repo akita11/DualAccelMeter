@@ -4,6 +4,14 @@
 #include <FastLED.h>
 #include "bmi270_config.h"
 
+// MadgwickAHRS: https://qiita.com/Ninagawa123/items/9520bad3c78ee40194fc
+// 9axis: https://misosoup4258.hatenablog.com/entry/2021/12/29/185801#Madgwick%E3%83%95%E3%82%A3%E3%83%AB%E3%82%BF%E3%83%BC
+
+#include "MadgwickAHRS.h"
+Madgwick mf[2];
+
+float roll[2], pitch[2], yaw[2];
+
 // IMU Pro Unit
 // https://www.switch-science.com/products/9426
 
@@ -69,7 +77,7 @@ uint8_t auxReadRegB(uint8_t i2c_addr, uint8_t reg)
 	return readRegB(i2c_addr, 0x04); // AUX X's LSB
 }
 
-// for BMI270
+// for BMI270&BMM150
 void IMUinit(uint8_t i2c_addr)
 {
 	uint8_t index = 0;
@@ -189,6 +197,8 @@ void setup()
 	leds[0] = CRGB(0, 30, 0);
 	FastLED.show();
 
+	mf[0].begin(100);
+
 	fRun = 0;
 	setMeasure(fRun);
 }
@@ -206,8 +216,17 @@ void loop()
 		uint32_t t1 = micros();
 		tm = t1 - t0;
 		t0 = t1;
-//		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
-//		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
-		printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
+
+		// g: [deg/s]<-[rad/s]?, a[m/s^2]
+//		mf[0].updateIMU(gx[0], gy[0], gz[0], ax[0], ay[0], az[0]);
+		mf[0].update(gx[0], gy[0], gz[0], ax[0], ay[0], az[0], mx[0], my[0], mz[0]);
+		roll[0] = mf[0].getRoll();
+		pitch[0] = mf[0].getPitch();
+		yaw[0] = mf[0].getYaw();
+
+		//		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
+		//		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
+		//		printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
+		printf("%d,%.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0]);
 	}
 }
