@@ -81,8 +81,8 @@ static CRGB leds[NUM_LEDS];
 
 #define SAMPLE_FREQ 250
 
-#define I2C_ADDR_IMU0 0x68	// IMU#1
-#define I2C_ADDR_IMU1 0x69	// IMU#2
+#define I2C_ADDR_IMU0 0x68	// IMU#0
+#define I2C_ADDR_IMU1 0x69	// IMU#1
 #define I2C_CLK_FREQ 400000 // 400kHz
 
 float ax[2], ay[2], az[2];
@@ -143,17 +143,15 @@ uint8_t buf0[20], buf1[20];
 bool auxWriteRegB(uint8_t i2c_addr, uint8_t reg, uint8_t data)
 {
 	// AUXにアドレスを書き込み
-	if (writeRegB(i2c_addr, BMI270_REG_AUX_WR_ADDR, reg) != BMI270_OK)
+	if (!writeRegB(i2c_addr, BMI270_REG_AUX_WR_ADDR, reg))
 	{
-//		while(1) printf("0 : %02x %02x\n", BMI270_REG_AUX_WR_ADDR, reg);
-//		return false;
+		return false;
 	}
 
 	// AUXにデータを書き込み
-	if (writeRegB(i2c_addr, BMI270_REG_AUX_WR_DATA, data) != BMI270_OK)
+	if (!writeRegB(i2c_addr, BMI270_REG_AUX_WR_DATA, data))
 	{
-//		while(1) printf("1 : %02x %02x\n", BMI270_REG_AUX_WR_DATA, data);
-//		return false;
+		return false;
 	}
 
 	// 操作完了を待機（タイムアウト付き）
@@ -173,19 +171,19 @@ bool auxWriteRegB(uint8_t i2c_addr, uint8_t reg, uint8_t data)
 		vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
 	} while (status & 0b100);
 
-	return (retry > 0);
+	return true;
 }
 
 int auxReadRegB(uint8_t i2c_addr, uint8_t reg)
 {
 	// Enable read with burst length 1
-	if (writeRegB(i2c_addr, BMI270_REG_AUX_IF_CONF, BMM150_AUX_RD_BURST_LEN1) != BMI270_OK)
+	if (!writeRegB(i2c_addr, BMI270_REG_AUX_IF_CONF, BMM150_AUX_RD_BURST_LEN1))
 	{
 		return BMI270_ERR_WRITE_FAILED;
 	}
 
 	// Set address to read from AUX
-	if (writeRegB(i2c_addr, BMI270_REG_AUX_RD_ADDR, reg) != BMI270_OK)
+	if (!writeRegB(i2c_addr, BMI270_REG_AUX_RD_ADDR, reg))
 	{
 		return BMI270_ERR_WRITE_FAILED;
 	}
@@ -203,6 +201,7 @@ int auxReadRegB(uint8_t i2c_addr, uint8_t reg)
 	}
 
 	// Read the data
+/*
 	int result = readRegB(i2c_addr, BMI270_REG_AUX_DATA);
 	if (result < 0)
 	{
@@ -210,6 +209,8 @@ int auxReadRegB(uint8_t i2c_addr, uint8_t reg)
 	}
 
 	return result;
+*/
+	return(readRegB(i2c_addr, BMI270_REG_AUX_DATA));
 }
 
 // for BMI270&BMM150
@@ -289,7 +290,6 @@ int IMUinit(uint8_t i2c_addr)
 	auto who_am_i = auxReadRegB(i2c_addr, 0x40); // 0x40 = WhoAmI
 	if (who_am_i != 0x32)
 	{
-		while(1) printf("%02x\n", who_am_i);
 		return BMI270_ERR_WRONG_CHIP_ID;
 	}
 
@@ -314,7 +314,7 @@ void IRAM_ATTR onTimer(void *arg)
 
 	// Read and validate IMU#1 data
 	bool imu1_valid = true;
-	if (readReg(I2C_ADDR_IMU0, BMI270_REG_AUX_DATA, buf0, 20) != BMI270_OK)
+	if (!readReg(I2C_ADDR_IMU0, BMI270_REG_AUX_DATA, buf0, 20))
 	{
 		imu1_valid = false;
 	}
@@ -332,7 +332,7 @@ void IRAM_ATTR onTimer(void *arg)
 		gx[0] = (float)conv_value(buf0[15], buf0[14]) / (32768.0f * 2000.0f); // [dps]
 		gy[0] = (float)conv_value(buf0[17], buf0[16]) / (32768.0f * 2000.0f);
 		gz[0] = (float)conv_value(buf0[19], buf0[18]) / (32768.0f * 2000.0f);
-
+/*
 		// Validate sensor data
 		if (!is_acc_valid(ax[0], ay[0], az[0]) ||
 				!is_gyro_valid(gx[0], gy[0], gz[0]) ||
@@ -340,11 +340,12 @@ void IRAM_ATTR onTimer(void *arg)
 		{
 			imu1_valid = false;
 		}
+*/
 	}
 
 	// Read and validate IMU#2 data
 	bool imu2_valid = true;
-	if (readReg(I2C_ADDR_IMU1, BMI270_REG_AUX_DATA, buf1, 20) != BMI270_OK)
+	if (!readReg(I2C_ADDR_IMU1, BMI270_REG_AUX_DATA, buf1, 20))
 	{
 		imu2_valid = false;
 	}
@@ -362,7 +363,7 @@ void IRAM_ATTR onTimer(void *arg)
 		gx[1] = (float)conv_value(buf1[15], buf1[14]) / (32768.0f * 2000.0f); // [dps]
 		gy[1] = (float)conv_value(buf1[17], buf1[16]) / (32768.0f * 2000.0f);
 		gz[1] = (float)conv_value(buf1[19], buf1[18]) / (32768.0f * 2000.0f);
-
+/*
 		// Validate sensor data
 		if (!is_acc_valid(ax[1], ay[1], az[1]) ||
 				!is_gyro_valid(gx[1], gy[1], gz[1]) ||
@@ -370,25 +371,8 @@ void IRAM_ATTR onTimer(void *arg)
 		{
 			imu2_valid = false;
 		}
+*/	
 	}
-	/*
-			// Update Madgwick filter only if data is valid
-			if (imu1_valid) {
-					mf[0].updateIMU(gx[0], gy[0], gz[0], ax[0], ay[0], az[0]);
-	//        mf[0].computeAngles();
-					roll[0] = mf[0].getRoll();
-					pitch[0] = mf[0].getPitch();
-					yaw[0] = mf[0].getYaw();
-			}
-
-			if (imu2_valid) {
-					mf[1].updateIMU(gx[1], gy[1], gz[1], ax[1], ay[1], az[1]);
-	 //       mf[1].computeAngles();
-					roll[1] = mf[1].getRoll();
-					pitch[1] = mf[1].getPitch();
-					yaw[1] = mf[1].getYaw();
-			}
-	*/
 	fReady = 1;
 }
 
@@ -492,17 +476,20 @@ void loop()
 		uint32_t t1 = micros();
 		tm = t1 - t0;
 		t0 = t1;
-
+/*
 		// g: [deg/s]<-[rad/s]?, a[m/s^2]
-		//		mf[0].updateIMU(gx[0], gy[0], gz[0], ax[0], ay[0], az[0]);
-		mf[0].update(gx[0], gy[0], gz[0], ax[0], ay[0], az[0], mx[0], my[0], mz[0]);
-		roll[0] = mf[0].getRoll();
-		pitch[0] = mf[0].getPitch();
-		yaw[0] = mf[0].getYaw();
+		for (uint8_t i = 0; i < 8; i++){
+			//		mf[i].updateIMU(gx[i], gy[i], gz[i], ax[i], ay[i], az[i]);
+			mf[i].update(gx[i], gy[i], gz[i], ax[i], ay[i], az[i], mx[i], my[i], mz[i]);
+			roll[i] = mf[i].getRoll();
+			pitch[i] = mf[i].getPitch();
+			yaw[i] = mf[i].getYaw();
+		}
+*/
 
-		//		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
+		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
 		//		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
 		//		printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
-		printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], roll[0], pitch[0], yaw[0]);
+		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], roll[0], pitch[0], yaw[0]);
 	}
 }
