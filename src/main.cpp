@@ -3,7 +3,14 @@
 #include <Ticker.h>
 #include <FastLED.h>
 #include "bmi270_config.h"
-#include "esp_timer.h"
+//#include "esp_timer.h"
+
+#define SAMPLE_FREQ 250
+//#define SAMPLE_FREQ 25
+
+#define I2C_ADDR_IMU0 0x68	// IMU#0
+#define I2C_ADDR_IMU1 0x69	// IMU#1
+uint8_t i2c_addr[2] = {I2C_ADDR_IMU0, I2C_ADDR_IMU1};
 
 // Error codes
 #define BMI270_OK 0
@@ -17,9 +24,9 @@
 #define GRAVITY 9.80665f // Standard gravity in m/s^2
 
 // Sensor data validity checks
-#define ACC_MAX_MS2 (2.0f * GRAVITY) // Maximum acceleration in m/s^2
-#define GYRO_MAX_DPS 2000.0f				 // Maximum angular rate in degrees/s
-#define MAG_MAX_UT 1000.0f					 // Maximum magnetic field in μT
+#define ACC_MAX_MS2 2.0f     // Maximum acceleration in [g]
+#define GYRO_MAX_DPS 2000.0f // Maximum angular rate in degrees/s
+#define MAG_MAX_UT 1000.0f	 // Maximum magnetic field in μT
 
 // Retry settings
 #define MAX_RETRY_COUNT 10
@@ -30,6 +37,7 @@
 #define BMI270_REG_STATUS 0x03
 #define BMI270_REG_AUX_DATA 0x04
 #define BMI270_REG_INTERNAL_STATUS 0x21
+#define BMI270_REG_GYRO_RANGE 0x43
 #define BMI270_REG_GYRO_CONFIG 0x42
 #define BMI270_REG_ACC_CONFIG 0x40
 #define BMI270_REG_ACC_RANGE 0x41
@@ -64,7 +72,6 @@
 
 #include "MadgwickAHRS.h"
 Madgwick mf[2];
-
 float roll[2], pitch[2], yaw[2];
 
 // IMU Pro Unit
@@ -79,10 +86,6 @@ float roll[2], pitch[2], yaw[2];
 #define LED_DATA_PIN 35
 static CRGB leds[NUM_LEDS];
 
-#define SAMPLE_FREQ 250
-
-#define I2C_ADDR_IMU0 0x68	// IMU#0
-#define I2C_ADDR_IMU1 0x69	// IMU#1
 #define I2C_CLK_FREQ 400000 // 400kHz
 
 float ax[2], ay[2], az[2];
@@ -105,14 +108,12 @@ bool is_acc_valid(float ax, float ay, float az)
 					fabs(ay) <= ACC_MAX_MS2 &&
 					fabs(az) <= ACC_MAX_MS2);
 }
-
 bool is_gyro_valid(float gx, float gy, float gz)
 {
 	return (fabs(gx) <= GYRO_MAX_DPS &&
 					fabs(gy) <= GYRO_MAX_DPS &&
 					fabs(gz) <= GYRO_MAX_DPS);
 }
-
 bool is_mag_valid(float mx, float my, float mz)
 {
 	return (fabs(mx) <= MAG_MAX_UT &&
@@ -132,8 +133,8 @@ int conv_value(uint8_t dh, uint8_t dl)
 }
 Ticker ticker;
 uint8_t fRun = 0;
-;
-uint8_t buf0[20], buf1[20];
+
+uint8_t buf[20];
 
 #define writeRegB(i2c_addr, reg_addr, data) M5.Ex_I2C.writeRegister8(i2c_addr, reg_addr, data, I2C_CLK_FREQ)
 #define writeReg(i2c_addr, reg_addr, data, len) M5.Ex_I2C.writeRegister(i2c_addr, reg_addr, data, len, I2C_CLK_FREQ)
@@ -173,7 +174,6 @@ bool auxWriteRegB(uint8_t i2c_addr, uint8_t reg, uint8_t data)
 
 	return true;
 }
-
 int auxReadRegB(uint8_t i2c_addr, uint8_t reg)
 {
 	// Enable read with burst length 1
@@ -220,7 +220,7 @@ int IMUinit(uint8_t i2c_addr)
 	uint8_t addr_array[2] = {(uint8_t)((index >> 1) & 0x0F), (uint8_t)(index >> 5)};
 
 	// IMU init sequence
-	//printf("CHIP_ID(%02x) : %02x\n", readRegB(I2C_ADDR_IMU1, 0x00)); // CHIP_ID(0x00) = 0x24
+	//printf("CHIP_ID : %02x\n", readRegB(i2c_addr, 0x00)); // CHIP_ID = 0x24
 	if (!writeRegB(i2c_addr, BMI270_REG_PWR_CONF, BMI270_PWR_CONF_ADV_OFF))
 	{ // disable adv.power save
 		return BMI270_ERR_WRITE_FAILED;
@@ -262,17 +262,26 @@ int IMUinit(uint8_t i2c_addr)
 	} while (status != BMI270_INIT_COMPLETE);
 
 	// センサーの設定
+/*
 	if (!writeRegB(i2c_addr, BMI270_REG_PWR_CTRL, BMI270_PWR_CTRL_ALL_ON) ||	 // enable acc/gyro/aux
 			!writeRegB(i2c_addr, BMI270_REG_ACC_CONFIG, BMI270_ACC_ODR_400HZ) ||	 // Acc ODR=400Hz
 			!writeRegB(i2c_addr, BMI270_REG_PWR_CONF, BMI270_PWR_CONF_FIFO_WU) ||	 // disable adv. power save
 			!writeRegB(i2c_addr, BMI270_REG_ACC_RANGE, BMI270_ACC_RANGE_2G) ||		 // Acc range : +-2g
 			!writeRegB(i2c_addr, BMI270_REG_GYRO_CONFIG, BMI270_GYRO_ODR_400HZ) || // Gyro config
-			!writeRegB(i2c_addr, 0x43, 0x00))
-	{ // Gyro range
+			!writeRegB(i2c_addr, BMI270_REG_GYRO_RANGE,  0x00)) // Gyro range = +-2000dps
+	{
 		return BMI270_ERR_WRITE_FAILED;
 	}
+*/
+	writeRegB(i2c_addr, BMI270_REG_PWR_CTRL, BMI270_PWR_CTRL_ALL_ON);	 // enable acc/gyro/aux
+	writeRegB(i2c_addr, BMI270_REG_ACC_CONFIG, BMI270_ACC_ODR_400HZ);	 // Acc ODR=400Hz
+	writeRegB(i2c_addr, BMI270_REG_PWR_CONF, BMI270_PWR_CONF_FIFO_WU);	 // disable adv. power save
+	writeRegB(i2c_addr, BMI270_REG_ACC_RANGE, BMI270_ACC_RANGE_2G);		 // Acc range : +-2g
+	writeRegB(i2c_addr, BMI270_REG_GYRO_CONFIG, BMI270_GYRO_ODR_400HZ); // Gyro config
+	writeRegB(i2c_addr, BMI270_REG_GYRO_RANGE,  0x00); // Gyro range = +-2000dps
 
 	// AUX (BMM150) の初期化
+/*
 	if (!writeRegB(i2c_addr, 0x6b, 0x20) || // AUX I2C enable
 			!writeRegB(i2c_addr, 0x7c, 0x00) || // Power save disabled
 			!writeRegB(i2c_addr, 0x7d, 0x0e) || // AUX sensor disable
@@ -281,6 +290,13 @@ int IMUinit(uint8_t i2c_addr)
 	{ // BMM150's I2C addr
 		return BMI270_ERR_WRITE_FAILED;
 	}
+*/
+	writeRegB(i2c_addr, 0x6b, 0x20); // AUX I2C enable
+	writeRegB(i2c_addr, 0x7c, 0x00); // Power save disabled
+	writeRegB(i2c_addr, 0x7d, 0x0e); // AUX sensor disable
+	writeRegB(i2c_addr, 0x4c, 0x80); // enable manual AUX
+	writeRegB(i2c_addr, 0x4b, 0x10 << 1);
+
 
 	if (!auxWriteRegB(i2c_addr, 0x4b, 0x83))
 	{ // software reset + power on
@@ -293,85 +309,54 @@ int IMUinit(uint8_t i2c_addr)
 		return BMI270_ERR_WRONG_CHIP_ID;
 	}
 
+/*
 	if (!auxWriteRegB(i2c_addr, 0x4C, 0x38) || // normal mode / ODR 30Hz
 			!writeRegB(i2c_addr, 0x4c, 0x4f) ||		 // FCU_WRITE_EN + Manual BurstLength 8
 			!writeRegB(i2c_addr, 0x4d, 0x42) ||		 // 0x42 = BMM150 I2C Data X LSB reg
 			!writeRegB(i2c_addr, 0x7d, 0x0f))
-	{ // temp en | ACC en | GYR en | AUX en
+			{ // temp en | ACC en | GYR en | AUX en
 		return BMI270_ERR_WRITE_FAILED;
 	}
+*/
+	auxWriteRegB(i2c_addr, 0x4C, 0x38);  // normal mode / ODR 30Hz
+	writeRegB(i2c_addr, 0x4c, 0x4f); 	 // FCU_WRITE_EN + Manual BurstLength 8
+	writeRegB(i2c_addr, 0x4d, 0x42); 	 // 0x42 = BMM150 I2C Data X LSB reg
+	writeRegB(i2c_addr, 0x7d, 0x0f);  // temp en | ACC en | GYR en | AUX en
 
 	return BMI270_OK;
 }
 
 uint32_t t0, tm;
 
-void IRAM_ATTR onTimer(void *arg)
+//void IRAM_ATTR onTimer(void *arg)
+void IRAM_ATTR onTimer()
 {
-	if (!fRun)
-		return;
-	fReady = 0;
-
-	// Read and validate IMU#1 data
-	bool imu1_valid = true;
-	if (!readReg(I2C_ADDR_IMU0, BMI270_REG_AUX_DATA, buf0, 20))
-	{
-		imu1_valid = false;
-	}
-	else
-	{
-		// Process IMU#1 data
-		mx[0] = (float)(conv_value(buf0[1], buf0[0]) >> 3); // 13bit
-		my[0] = (float)(conv_value(buf0[3], buf0[2]) >> 3); // 13bit
-		mz[0] = (float)(conv_value(buf0[5], buf0[4]) >> 1); // 15bit
-
-		ax[0] = (float)conv_value(buf0[9], buf0[8]) * GRAVITY / 16384.0f; // [m/s^2]
-		ay[0] = (float)conv_value(buf0[11], buf0[10]) * GRAVITY / 16384.0f;
-		az[0] = (float)conv_value(buf0[13], buf0[12]) * GRAVITY / 16384.0f;
-
-		gx[0] = (float)conv_value(buf0[15], buf0[14]) / (32768.0f * 2000.0f); // [dps]
-		gy[0] = (float)conv_value(buf0[17], buf0[16]) / (32768.0f * 2000.0f);
-		gz[0] = (float)conv_value(buf0[19], buf0[18]) / (32768.0f * 2000.0f);
+	if (!fRun) return;
+	bool imu_valid[2];
+	// Read and validate IMU data
+	for (uint8_t i = 0; i < 2; i++){
+		imu_valid[i] = true;
+		if (!readReg(i2c_addr[i], BMI270_REG_AUX_DATA, buf, 20)) imu_valid[i] = false;
+		else {
+			// Process IMU data
+			// BMNM150 : +-1300uT(x/y), +-2500uT(z) (typ)
+			mx[i] = (float)(conv_value(buf[1], buf[0]) >> 3); // 13bit (+-4096)
+			my[i] = (float)(conv_value(buf[3], buf[2]) >> 3); // 13bit (+-4096)
+			mz[i] = (float)(conv_value(buf[5], buf[4]) >> 1); // 15bit (+-16384)
+			ax[i] = (float)conv_value(buf[ 9], buf[ 8]) / 16384.0f; // [g]
+			ay[i] = (float)conv_value(buf[11], buf[10]) / 16384.0f;
+			az[i] = (float)conv_value(buf[13], buf[12]) / 16384.0f;
+//			gx[i] = (float)conv_value(buf[15], buf[14]) / (32768.0f * 2000.0f); // [dps]
+			gx[i] = (float)conv_value(buf[15], buf[14]) / 32768.0f * 2000.0f; // [dps]
+			gy[i] = (float)conv_value(buf[17], buf[16]) / 32768.0f * 2000.0f;
+			gz[i] = (float)conv_value(buf[19], buf[18]) / 32768.0f * 2000.0f;
 /*
-		// Validate sensor data
-		if (!is_acc_valid(ax[0], ay[0], az[0]) ||
-				!is_gyro_valid(gx[0], gy[0], gz[0]) ||
-				!is_mag_valid(mx[0], my[0], mz[0]))
-		{
-			imu1_valid = false;
-		}
+			// Validate sensor data
+			if (!is_acc_valid(ax[i], ay[i], az[i]) ||
+				!is_gyro_valid(gx[i], gy[i], gz[i]) ||
+				!is_mag_valid(mx[i], my[i], mz[i])) imu_valid[i] = false;
 */
-	}
-
-	// Read and validate IMU#2 data
-	bool imu2_valid = true;
-	if (!readReg(I2C_ADDR_IMU1, BMI270_REG_AUX_DATA, buf1, 20))
-	{
-		imu2_valid = false;
-	}
-	else
-	{
-		// Process IMU#2 data
-		mx[1] = (float)(conv_value(buf1[1], buf1[0]) >> 3); // 13bit
-		my[1] = (float)(conv_value(buf1[3], buf1[2]) >> 3); // 13bit
-		mz[1] = (float)(conv_value(buf1[5], buf1[4]) >> 1); // 15bit
-
-		ax[1] = (float)conv_value(buf1[9], buf1[8]) * GRAVITY / 16384.0f; // [m/s^2]
-		ay[1] = (float)conv_value(buf1[11], buf1[10]) * GRAVITY / 16384.0f;
-		az[1] = (float)conv_value(buf1[13], buf1[12]) * GRAVITY / 16384.0f;
-
-		gx[1] = (float)conv_value(buf1[15], buf1[14]) / (32768.0f * 2000.0f); // [dps]
-		gy[1] = (float)conv_value(buf1[17], buf1[16]) / (32768.0f * 2000.0f);
-		gz[1] = (float)conv_value(buf1[19], buf1[18]) / (32768.0f * 2000.0f);
-/*
-		// Validate sensor data
-		if (!is_acc_valid(ax[1], ay[1], az[1]) ||
-				!is_gyro_valid(gx[1], gy[1], gz[1]) ||
-				!is_mag_valid(mx[1], my[1], mz[1]))
-		{
-			imu2_valid = false;
 		}
-*/	
 	}
 	fReady = 1;
 }
@@ -382,8 +367,11 @@ void setMeasure(uint8_t f)
 	{
 		leds[0] = CRGB(30, 30, 0);
 		FastLED.show();
+		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTimer);
+/*
 		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), []()
 										 { onTimer(nullptr); });
+*/
 	}
 	else
 	{
@@ -395,7 +383,6 @@ void setMeasure(uint8_t f)
 
 void setup()
 {
-	// M5Stackの設定
 	auto cfg = M5.config();
 	cfg.external_imu = false;
 	cfg.internal_imu = false;
@@ -416,17 +403,17 @@ void setup()
 	FastLED.show();
 
 	int result;
-	result = IMUinit(I2C_ADDR_IMU0);
+	while(IMUinit(I2C_ADDR_IMU0) != BMI270_OK) delay(10);
+	while(IMUinit(I2C_ADDR_IMU1) != BMI270_OK) delay(10);
+/*
 	if (result != BMI270_OK)
 	{
 		while (1)
 		{
 			leds[0] = CRGB::Red; FastLED.show(); delay(200);
 			leds[0] = CRGB::Black; FastLED.show(); delay(200);
-			printf("%d\n", result);
 		}
 	}
-
 	result = IMUinit(I2C_ADDR_IMU1);
 	if (result != BMI270_OK)
 	{
@@ -436,7 +423,8 @@ void setup()
 			leds[0] = CRGB::Black; FastLED.show(); delay(200);
 		}
 	}
-
+*/
+/*
 	// 高精度タイマーの設定（250Hz）
 	esp_timer_create_args_t timer_args = {
 			.callback = onTimer,
@@ -446,10 +434,11 @@ void setup()
 
 	ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle));
 	ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle, 1000000 / SAMPLE_FREQ)); // マイクロ秒に変換
+*/
 
 	// Madgwickフィルタの初期化
-	mf[0].begin(100);
-	mf[1].begin(100);
+	mf[0].begin(SAMPLE_FREQ);
+	mf[1].begin(SAMPLE_FREQ);
 
 	// 初期化成功を表示
 	leds[0] = CRGB(0, 30, 0); // 成功時は緑
@@ -476,20 +465,21 @@ void loop()
 		uint32_t t1 = micros();
 		tm = t1 - t0;
 		t0 = t1;
-/*
-		// g: [deg/s]<-[rad/s]?, a[m/s^2]
-		for (uint8_t i = 0; i < 8; i++){
-			//		mf[i].updateIMU(gx[i], gy[i], gz[i], ax[i], ay[i], az[i]);
-			mf[i].update(gx[i], gy[i], gz[i], ax[i], ay[i], az[i], mx[i], my[i], mz[i]);
+		// g: [deg/s], a[g]
+		for (uint8_t i = 0; i < 2; i++){
+			mf[i].updateIMU(gx[i], gy[i], gz[i], ax[i], ay[i], az[i]);
+			//mf[i].update(gx[i], gy[i], gz[i], ax[i], ay[i], az[i], mx[i], my[i], mz[i]);
 			roll[i] = mf[i].getRoll();
 			pitch[i] = mf[i].getPitch();
 			yaw[i] = mf[i].getYaw();
 		}
-*/
 
-		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
-		//		printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
-		//		printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
+		//printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
+		//printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
+		//printf("%d,%f,%f,%f\n", tm, gx[0], gy[0], gz[0]);
+		//printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
 		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], roll[0], pitch[0], yaw[0]);
+		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+		printf("Orientation: %.3f %.3f %.3f %.3f %.3f %.3f\n", roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 	}
 }
