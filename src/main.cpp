@@ -480,6 +480,7 @@ void loop()
 		//printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
 		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], roll[0], pitch[0], yaw[0]);
 		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-		printf("Orientation: %.3f %.3f %.3f %.3f %.3f %.3f\n", roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+		//printf("Orientation: %.3f %.3f %.3f %.3f %.3f %.3f\n", roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+		printf("Dir: %d %.3f %.3f %.3f %.3f %.3f %.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 	}
 }
