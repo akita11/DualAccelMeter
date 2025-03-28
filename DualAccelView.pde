@@ -9,7 +9,7 @@ void setup() {
   size(800, 600, P3D);
   //myPort = new Serial(this, Serial.list()[0], 115200);
   myPort = new Serial(this, "/dev/cu.usbmodem101", 115200);  // Mac
-  //myPort = new Serial(this, "COM5:", 9600);                    // Windows
+  //myPort = new Serial(this, "COM5", 115200);                    // Windows
   textSize(24);
   textAlign(CENTER, CENTER);
 }
@@ -42,14 +42,14 @@ void serialEvent() {
   String message;
   while ((message = myPort.readStringUntil('\n')) != null) {
     message = trim(message);
-    String[] list = split(message, " ");
-    if (list.length >= 7 && list[0].equals("Dir:")) {
-      yaw[0] = float(list[1]);
-      pitch[0] = float(list[2]);
-      roll[0] = float(list[3]);
-      yaw[1] = float(list[4]);
-      pitch[1] = float(list[5]);
-      roll[1] = float(list[6]);
+    String[] list = split(message, ",");
+    if (list.length >= 8 && list[0].equals("Dir:")) {
+      roll[0] = float(list[2]);
+      pitch[0] = float(list[3]);
+      yaw[0] = float(list[4]);
+      roll[1] = float(list[5]);
+      pitch[1] = float(list[6]);
+      yaw[1] = float(list[7]);
     }
   }
 }
@@ -78,9 +78,9 @@ void drawObject(int i) {
   strokeWeight(strokeWeightValue);
 
   color[] colors = {
-    (i == 0) ? color(255, 0, 0) : color(255, 100, 100),
-    (i == 0) ? color(0, 255, 0) : color(100, 255, 100),
-    (i == 0) ? color(0, 0, 255) : color(100, 100, 255)
+    (i == 0) ? color(255, 0, 0) : color(255, 100, 100), // X=red
+    (i == 0) ? color(0, 255, 0) : color(100, 255, 100), // Y=green
+    (i == 0) ? color(0, 0, 255) : color(100, 100, 255)  // Z=blue
   };
 
   // X軸
