@@ -73,6 +73,7 @@ uint8_t i2c_addr[2] = {I2C_ADDR_IMU0, I2C_ADDR_IMU1};
 #include "MadgwickAHRS.h"
 Madgwick mf[2];
 float roll[2], pitch[2], yaw[2];
+float roll0[2], pitch0[2], yaw0[2];
 
 // IMU Pro Unit
 // https://www.switch-science.com/products/9426
@@ -368,6 +369,9 @@ void setMeasure(uint8_t f)
 		leds[0] = CRGB(30, 30, 0);
 		FastLED.show();
 		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTimer);
+		for (uint8_t i = 0; i < 2; i++){
+			roll0[i] = roll[i]; pitch0[i] = pitch[i]; yaw0[i] = yaw[i];
+		}
 /*
 		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), []()
 										 { onTimer(nullptr); });
@@ -437,12 +441,15 @@ void setup()
 */
 
 	// Madgwickフィルタの初期化
-	mf[0].begin(SAMPLE_FREQ);
-	mf[1].begin(SAMPLE_FREQ);
+	for (uint8_t i =0; i < 2; i++){
+		mf[i].begin(SAMPLE_FREQ);
+		roll0[i] = 0.0; pitch0[i] = 0.0; yaw0[i] = 0.0;
+	}
 
 	// 初期化成功を表示
 	leds[0] = CRGB(0, 30, 0); // 成功時は緑
 	FastLED.show();
+
 
 	fRun = 0;
 	setMeasure(fRun);
@@ -480,6 +487,6 @@ void loop()
 		//printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
 		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], roll[0], pitch[0], yaw[0]);
 		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-		printf("Dir:,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+		printf("Dir:,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, roll[0] - roll0[0], pitch[0] - pitch0[0], yaw[0] - yaw0[0], roll[1] - roll0[1], pitch[1] - pitch0[1], yaw[1] - yaw0[1]);
 	}
 }
