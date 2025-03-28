@@ -61,11 +61,17 @@ void applyRotationMatrix(int i) {
   float s2 = sin(radians(pitch[i]));
   float c3 = cos(radians(yaw[i]));
   float s3 = sin(radians(yaw[i]));
-
   applyMatrix(
+/*
     c2 * c3,                  s1 * s3 + c1 * c3 * s2,   c3 * s1 * s2 - c1 * s3, 0,
     -s2,                      c1 * c2,                  c2 * s1,               0,
     c2 * s3,                  c1 * s2 * s3 - c3 * s1,   c1 * c3 + s1 * s2 * s3, 0,
+    0,                        0,                        0,                     1
+*/
+    // ref: https://rikei-tawamure.com/entry/2025/03/15/225248
+    c3 * c2,                  c3 * s2 * s1 - s3 * c1,   c3 * s2 * c1 + s3 * s1, 0,
+    s3 * c2,                  s3 * s2 * s1 + c3 * c1,   s3 * s2 * c1 - c3 * s1, 0,
+    -s2,                      c2 * s1,                  c2 * c1               , 0,
     0,                        0,                        0,                     1
   );
 }
