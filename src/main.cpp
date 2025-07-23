@@ -3,6 +3,7 @@
 #include <Ticker.h>
 #include <FastLED.h>
 #include "bmi270_config.h"
+#include <EEPROM.h>
 
 #define SAMPLE_FREQ 250
 //#define SAMPLE_FREQ 100
@@ -75,6 +76,7 @@ uint8_t i2c_addr[2] = {I2C_ADDR_IMU0, I2C_ADDR_IMU1};
 #include "MadgwickAHRS.h"
 Madgwick mf[2];
 float roll[2], pitch[2], yaw[2];
+std::vector<int> magX[2], magY[2], magZ[2];
 
 // IMU Pro Unit
 // https://www.switch-science.com/products/9426
@@ -334,26 +336,26 @@ void IRAM_ATTR onTimer()
 
 void setMeasure(uint8_t f)
 {
-	if (f == 1)
+	if (f == 1 || f == 3)
 	{
-		leds[0] = CRGB(30, 30, 0);
-		FastLED.show();
+		if (f == 1) leds[0] = CRGB(30, 30, 0); // yellow, running
+		else if (f == 3) leds[0] = CRGB(30, 0, 30); // purple, calibration
 		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTimer);
-/*
-		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), []()
-										 { onTimer(nullptr); });
-*/
 	}
-	else
+	else if (f == 0 || f == 2)
 	{
 		ticker.detach();
-		leds[0] = CRGB(0, 30, 0);
-		FastLED.show();
+		if (f == 0) leds[0] = CRGB(0, 30, 0); // green, idle
+		else if (f == 2) leds[0] = CRGB(0, 30, 30); // cyan, calibration idle
 	}
+	FastLED.show();
 }
 
-float x0, yy0, z0, a, b, c;
-float fmx, fmy, fmz;
+float mx0[2], my0[2], mz0[2], ma[2], mb[2], mc[2], fmx[2], fmy[2], fmz[2];
+uint16_t nSample = 0;
+const int EEPROM_SIZE = 64;
+const int EEPROM_ADDR = 0; 
+float calib[12];
 
 void setup()
 {
@@ -420,11 +422,109 @@ void setup()
 	leds[0] = CRGB(0, 30, 0); // 成功時は緑
 	FastLED.show();
 
-	fRun = 0;
+	M5.update();
+	if (M5.BtnA.isPressed())
+	{
+		fRun = 2; // calibration mode (idle)
+	}
+	else{
+		fRun = 0; // measurement mode (idle)
+		EEPROM.begin(EEPROM_SIZE);
+		EEPROM.get(EEPROM_ADDR, calib);
+		for (uint8_t i = 0; i < 2; i++){
+			mx0[i] = calib[i*6+6]; my0[i] = calib[i*6+7];  mz0[i] = calib[i*6+8];
+			ma[i]  = calib[i*6+9]; mb[i]  = calib[i*6+10]; mc[i]  = calib[i*6+11];
+			printf("calib[%d]: %.3f %.3f %.3f / %.3f %.3f %.3f\n", i, mx0[i], my0[i], mz0[i], ma[i], mb[i], mc[i]);
+		}
+	}
 	setMeasure(fRun);
+}
 
-	x0 = 4.857; yy0 = -16.526; z0 = -14.264;
-	a = 38.934; b = 38.696; c = 35.286;
+void calc_calib()
+{
+	int N = magX[0].size();
+	printf("cap.N=%d\n", N);
+	if (N < 100) printf("Not enough data.\n");
+	else
+	{
+		for (uint8_t p = 0; p < 2; p++){
+			// 正規方程式に基づく最小二乗法, Solve Ax = b for [Bx By Bz D]^T
+			float Sxx = 0, Sxy = 0, Sxz = 0, Sx1 = 0;
+			float Syy = 0, Syz = 0, Sy1 = 0;
+			float Szz = 0, Sz1 = 0;
+			float S11 = N;
+			float Sx_r2 = 0, Sy_r2 = 0, Sz_r2 = 0, S1_r2 = 0;
+			for (int i = 0; i < N; ++i){
+				float x = magX[p][i], y = magY[p][i], z = magZ[p][i];
+				//printf("%d %d %.3f\n", i, magX[i], x);
+				float r2 = x * x + y * y + z * z;
+				Sxx += x * x;
+				Sxy += x * y;
+				Sxz += x * z;
+				Sx1 += x;
+				Syy += y * y;
+				Syz += y * z;
+				Sy1 += y;
+				Szz += z * z;
+				Sz1 += z;
+
+				Sx_r2 += x * r2;
+				Sy_r2 += y * r2;
+				Sz_r2 += z * r2;
+				S1_r2 += r2;
+			}
+
+			float A[4][4] = {
+				{Sxx, Sxy, Sxz, Sx1},
+				{Sxy, Syy, Syz, Sy1},
+				{Sxz, Syz, Szz, Sz1},
+				{Sx1, Sy1, Sz1, S11}};
+			float B[4] = {Sx_r2, Sy_r2, Sz_r2, S1_r2};
+
+			// ガウス消去
+			for (int i = 0; i < 4; i++){
+				float pivot = A[i][i];
+				for (int j = 0; j < 4; j++) A[i][j] /= pivot;
+				B[i] /= pivot;
+				for (int k = i + 1; k < 4; k++){
+					float factor = A[k][i];
+					for (int j = 0; j < 4; j++) A[k][j] -= factor * A[i][j];
+					B[k] -= factor * B[i];
+				}
+			}
+			float X[4];
+			for (int i = 3; i >= 0; i--){
+				X[i] = B[i];
+				for (int j = i + 1; j < 4; j++){
+					X[i] -= A[i][j] * X[j];
+				}
+			}
+			mx0[p] = X[0] / 2.0;
+			my0[p] = X[1] / 2.0;
+			mz0[p] = X[2] / 2.0;
+
+			// スケールは中心補正後の分散で近似
+			float sumX2 = 0, sumY2 = 0, sumZ2 = 0;
+			for (int i = 0; i < N; ++i){
+				float dx = magX[p][i] - mx0[p];
+				float dy = magY[p][i] - my0[p];
+				float dz = magZ[p][i] - mz0[p];
+				sumX2 += dx * dx;
+				sumY2 += dy * dy;
+				sumZ2 += dz * dz;
+			}
+			ma[p] = sqrt(sumX2 / N);
+			mb[p] = sqrt(sumY2 / N);
+			mc[p] = sqrt(sumZ2 / N);
+			printf("%d: %.3f %.3f %.3f %.3f %.3f %.3f\n", p, mx0[p], my0[p], mz0[p], ma[p], mb[p], mc[p]);
+			// そのまま使用可能なスケール係数（1で正規化する場合）
+			EEPROM.begin(EEPROM_SIZE);
+			calib[p*6]   = mx0[p]; calib[p*6+1] = my0[p]; calib[p*6+2] = mz0[p];
+			calib[p*6+3] = ma[p];  calib[p*6+4] = mb[p];  calib[p*6+5] = mc[p];
+		}
+		EEPROM.put(EEPROM_ADDR, calib);
+		EEPROM.commit();
+	}
 }
 
 void loop()
@@ -432,7 +532,12 @@ void loop()
 	M5.update();
 	if (M5.BtnA.wasPressed())
 	{
-		fRun = 1 - fRun;
+		switch(fRun){
+			case 0 : fRun = 1; for (uint8_t i = 0; i < 2; i++){ magX[i].clear(); magY[i].clear(); magZ[i].clear();} break;
+			case 1 : fRun = 0; calc_calib(); break;
+			case 2 : fRun = 3; break;
+			case 3 : fRun = 2; break;
+		}
 /*
 		if (fRun == 1){
 			// Roller485 cmd:
@@ -456,24 +561,21 @@ void loop()
 	if (fRun == 1)
 	{
 		fReady = 0;
-		while (fReady == 0)
-			;
+		while (fReady == 0);
 		uint32_t t1 = micros();
 		tm = t1 - t0;
 		t0 = t1;
 		// g: [deg/s], a[g]
-		fmx = ((float)mx[0] - x0) / a;
-		fmy = ((float)my[0] - yy0) / b;
-		fmz = ((float)mz[0] - z0) / c;
-		float norm = sqrt(fmx * fmx + fmy * fmy + fmz * fmz);
-		fmx /= norm;
-		fmy /= norm;
-		fmz /= norm;
-		mf[0].update(gx[0], gy[0], gz[0], ax[0], ay[0], az[0], fmx, fmy, fmz);
-		mf[1].updateIMU(gx[1], gy[1], gz[1], ax[1], ay[1], az[1]);
 		for (uint8_t i = 0; i < 2; i++){
+			fmx[i] = ((float)mx[i] - mx0[i]) / ma[i];
+			fmy[i] = ((float)my[i] - my0[i]) / mb[i];
+			fmz[i] = ((float)mz[i] - mz0[i]) / mc[i];
+			float norm = sqrt(fmx[i] * fmx[i] + fmy[i] * fmy[i] + fmz[i] * fmz[i]);
+			fmx[i] /= norm;
+			fmy[i] /= norm;
+			fmz[i] /= norm;
+			mf[i].update(gx[i], gy[i], gz[i], ax[i], ay[i], az[i], fmx[i], fmy[i], fmz[i]);
 			//mf[i].updateIMU(gx[i], gy[i], gz[i], ax[i], ay[i], az[i]);
-//			mf[i].update(gx[i], gy[i], gz[i], ax[i], ay[i], az[i], mx[i], my[i], mz[i]);
 			roll[i] = mf[i].getRoll();
 			pitch[i] = mf[i].getPitch();
 			yaw[i] = mf[i].getYaw();
@@ -499,5 +601,15 @@ void loop()
 //		printf("Dir:,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 //		printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 //		printf("%.3f %.3f %.3f %.3f %.3f %.3f\n", roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+	}
+
+	if (fRun == 3){
+		for (uint8_t i = 0; i < 2; i++){
+			magX[i].push_back(mx[i]);
+			magY[i].push_back(my[i]);
+			magZ[i].push_back(mz[i]);
+		}
+		printf("%d %d %d %d %d %d\n", mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
+		delay(10);
 	}
 }
