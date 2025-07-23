@@ -3,9 +3,9 @@
 #include <Ticker.h>
 #include <FastLED.h>
 #include "bmi270_config.h"
-//#include "esp_timer.h"
 
 #define SAMPLE_FREQ 250
+//#define SAMPLE_FREQ 100
 //#define SAMPLE_FREQ 25
 
 #define I2C_ADDR_IMU0 0x68	// IMU#0
@@ -63,6 +63,8 @@ uint8_t i2c_addr[2] = {I2C_ADDR_IMU0, I2C_ADDR_IMU1};
 #define BMI270_ACC_ODR_400HZ 0xAA
 #define BMI270_ACC_RANGE_2G 0x00
 #define BMI270_GYRO_ODR_400HZ 0xEA
+#define BMI270_GYRO_ODR_100HZ 0xE8
+#define BMI270_GYRO_ODR_25HZ 0xE6
 
 // AUX (BMM150) related
 #define BMM150_AUX_RD_BURST_LEN1 0x80
@@ -262,17 +264,6 @@ int IMUinit(uint8_t i2c_addr)
 	} while (status != BMI270_INIT_COMPLETE);
 
 	// センサーの設定
-/*
-	if (!writeRegB(i2c_addr, BMI270_REG_PWR_CTRL, BMI270_PWR_CTRL_ALL_ON) ||	 // enable acc/gyro/aux
-			!writeRegB(i2c_addr, BMI270_REG_ACC_CONFIG, BMI270_ACC_ODR_400HZ) ||	 // Acc ODR=400Hz
-			!writeRegB(i2c_addr, BMI270_REG_PWR_CONF, BMI270_PWR_CONF_FIFO_WU) ||	 // disable adv. power save
-			!writeRegB(i2c_addr, BMI270_REG_ACC_RANGE, BMI270_ACC_RANGE_2G) ||		 // Acc range : +-2g
-			!writeRegB(i2c_addr, BMI270_REG_GYRO_CONFIG, BMI270_GYRO_ODR_400HZ) || // Gyro config
-			!writeRegB(i2c_addr, BMI270_REG_GYRO_RANGE,  0x00)) // Gyro range = +-2000dps
-	{
-		return BMI270_ERR_WRITE_FAILED;
-	}
-*/
 	writeRegB(i2c_addr, BMI270_REG_PWR_CTRL, BMI270_PWR_CTRL_ALL_ON);	 // enable acc/gyro/aux
 	writeRegB(i2c_addr, BMI270_REG_ACC_CONFIG, BMI270_ACC_ODR_400HZ);	 // Acc ODR=400Hz
 	writeRegB(i2c_addr, BMI270_REG_PWR_CONF, BMI270_PWR_CONF_FIFO_WU);	 // disable adv. power save
@@ -281,16 +272,6 @@ int IMUinit(uint8_t i2c_addr)
 	writeRegB(i2c_addr, BMI270_REG_GYRO_RANGE,  0x00); // Gyro range = +-2000dps
 
 	// AUX (BMM150) の初期化
-/*
-	if (!writeRegB(i2c_addr, 0x6b, 0x20) || // AUX I2C enable
-			!writeRegB(i2c_addr, 0x7c, 0x00) || // Power save disabled
-			!writeRegB(i2c_addr, 0x7d, 0x0e) || // AUX sensor disable
-			!writeRegB(i2c_addr, 0x4c, 0x80) || // enable manual AUX
-			!writeRegB(i2c_addr, 0x4b, 0x10 << 1))
-	{ // BMM150's I2C addr
-		return BMI270_ERR_WRITE_FAILED;
-	}
-*/
 	writeRegB(i2c_addr, 0x6b, 0x20); // AUX I2C enable
 	writeRegB(i2c_addr, 0x7c, 0x00); // Power save disabled
 	writeRegB(i2c_addr, 0x7d, 0x0e); // AUX sensor disable
@@ -309,15 +290,6 @@ int IMUinit(uint8_t i2c_addr)
 		return BMI270_ERR_WRONG_CHIP_ID;
 	}
 
-/*
-	if (!auxWriteRegB(i2c_addr, 0x4C, 0x38) || // normal mode / ODR 30Hz
-			!writeRegB(i2c_addr, 0x4c, 0x4f) ||		 // FCU_WRITE_EN + Manual BurstLength 8
-			!writeRegB(i2c_addr, 0x4d, 0x42) ||		 // 0x42 = BMM150 I2C Data X LSB reg
-			!writeRegB(i2c_addr, 0x7d, 0x0f))
-			{ // temp en | ACC en | GYR en | AUX en
-		return BMI270_ERR_WRITE_FAILED;
-	}
-*/
 	auxWriteRegB(i2c_addr, 0x4C, 0x38);  // normal mode / ODR 30Hz
 	writeRegB(i2c_addr, 0x4c, 0x4f); 	 // FCU_WRITE_EN + Manual BurstLength 8
 	writeRegB(i2c_addr, 0x4d, 0x42); 	 // 0x42 = BMM150 I2C Data X LSB reg
@@ -346,7 +318,6 @@ void IRAM_ATTR onTimer()
 			ax[i] = (float)conv_value(buf[ 9], buf[ 8]) / 16384.0f; // [g]
 			ay[i] = (float)conv_value(buf[11], buf[10]) / 16384.0f;
 			az[i] = (float)conv_value(buf[13], buf[12]) / 16384.0f;
-//			gx[i] = (float)conv_value(buf[15], buf[14]) / (32768.0f * 2000.0f); // [dps]
 			gx[i] = (float)conv_value(buf[15], buf[14]) / 32768.0f * 2000.0f; // [dps]
 			gy[i] = (float)conv_value(buf[17], buf[16]) / 32768.0f * 2000.0f;
 			gz[i] = (float)conv_value(buf[19], buf[18]) / 32768.0f * 2000.0f;
@@ -380,6 +351,9 @@ void setMeasure(uint8_t f)
 		FastLED.show();
 	}
 }
+
+float x0, yy0, z0, a, b, c;
+float fmx, fmy, fmz;
 
 void setup()
 {
@@ -439,6 +413,8 @@ void setup()
 	// Madgwickフィルタの初期化
 	mf[0].begin(SAMPLE_FREQ);
 	mf[1].begin(SAMPLE_FREQ);
+//	mf[0].setGain(0.1); // beta (default=0.1)
+//	mf[1].setGain(0.9); // beta (default=0.1)
 
 	// 初期化成功を表示
 	leds[0] = CRGB(0, 30, 0); // 成功時は緑
@@ -446,6 +422,9 @@ void setup()
 
 	fRun = 0;
 	setMeasure(fRun);
+
+	x0 = 4.857; yy0 = -16.526; z0 = -14.264;
+	a = 38.934; b = 38.696; c = 35.286;
 }
 
 void loop()
@@ -454,6 +433,23 @@ void loop()
 	if (M5.BtnA.wasPressed())
 	{
 		fRun = 1 - fRun;
+/*
+		if (fRun == 1){
+			// Roller485 cmd:
+			// 0x00: 1=on
+			// 0x01: 1=speed mode
+			// 0x40-0x43: speed (LSB->MSB) / 100
+			writeRegB(0x64, 0x01, 1); // speed mode
+			writeRegB(0x64, 0x40, 0x00); // speed[0]
+			writeRegB(0x64, 0x41, 0x18); // speed[1]
+			writeRegB(0x64, 0x42, 0x00); // speed[2]
+			writeRegB(0x64, 0x43, 0x00); // speed[3]
+			writeRegB(0x64, 0x00, 0x01); // ON
+		}
+		else{
+			writeRegB(0x64, 0x00, 0x00); // OFF
+		}
+*/
 		setMeasure(fRun);
 		delay(500);
 	}
@@ -466,21 +462,42 @@ void loop()
 		tm = t1 - t0;
 		t0 = t1;
 		// g: [deg/s], a[g]
+		fmx = ((float)mx[0] - x0) / a;
+		fmy = ((float)my[0] - yy0) / b;
+		fmz = ((float)mz[0] - z0) / c;
+		float norm = sqrt(fmx * fmx + fmy * fmy + fmz * fmz);
+		fmx /= norm;
+		fmy /= norm;
+		fmz /= norm;
+		mf[0].update(gx[0], gy[0], gz[0], ax[0], ay[0], az[0], fmx, fmy, fmz);
+		mf[1].updateIMU(gx[1], gy[1], gz[1], ax[1], ay[1], az[1]);
 		for (uint8_t i = 0; i < 2; i++){
-			mf[i].updateIMU(gx[i], gy[i], gz[i], ax[i], ay[i], az[i]);
-			//mf[i].update(gx[i], gy[i], gz[i], ax[i], ay[i], az[i], mx[i], my[i], mz[i]);
+			//mf[i].updateIMU(gx[i], gy[i], gz[i], ax[i], ay[i], az[i]);
+//			mf[i].update(gx[i], gy[i], gz[i], ax[i], ay[i], az[i], mx[i], my[i], mz[i]);
 			roll[i] = mf[i].getRoll();
 			pitch[i] = mf[i].getPitch();
 			yaw[i] = mf[i].getYaw();
 		}
 
+//		printf(">gx0:%f\n>gy0:%f\n>gz0:%f\n", gx[0], gy[0], gz[0]);
+//		printf(">ax0:%f\n>ay0:%f\n>az0:%f\n", ax[0], ay[0], az[0]);
+//		printf(">gx1:%f\n>gy1:%f\n>gz1:%f\n", gx[1], gy[1], gz[1]);
+//		printf(">ax1:%f\n>ay1:%f\n>az1:%f\n", ax[1], ay[1], az[1]);
+		printf(">r0:%f\n>y0:%f\n>p0:%f\n", roll[0], yaw[0], pitch[0]);
+//		printf(">r1:%f\n>y1:%f\n>p1:%f\n", roll[1], yaw[1], pitch[1]);
+//		printf(">r0-r1:%f\n>y0-y1:%f\n>p0-p1:%f\n", roll[0]-roll[1], yaw[0]-yaw[1], pitch[0]-pitch[1]);
 		//printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
-		//printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
+		//printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
+		///printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
 		//printf("%d,%f,%f,%f\n", tm, gx[0], gy[0], gz[0]);
 		//printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
+//		printf(">mx0:%f\n>my0:%f\n>mz0:%f\n", mx[0], my[0], mz[0]);
 		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], roll[0], pitch[0], yaw[0]);
 		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 		//printf("Orientation: %.3f %.3f %.3f %.3f %.3f %.3f\n", roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-		printf("Dir: %d %.3f %.3f %.3f %.3f %.3f %.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+		//printf("Dir: %d %.3f %.3f %.3f %.3f %.3f %.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+//		printf("Dir:,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+//		printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
+//		printf("%.3f %.3f %.3f %.3f %.3f %.3f\n", roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 	}
 }
