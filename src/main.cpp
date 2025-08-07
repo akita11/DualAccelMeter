@@ -11,6 +11,9 @@
 
 bool fUse9Axis = false;
 
+// ToDo: wait for stable (Madgwick filter convergence) after starting
+#define WAIT_FOR_STABLE
+
 #define I2C_ADDR_IMU0 0x68	// IMU#0
 #define I2C_ADDR_IMU1 0x69	// IMU#1
 uint8_t i2c_addr[2] = {I2C_ADDR_IMU0, I2C_ADDR_IMU1};
@@ -98,7 +101,11 @@ static CRGB leds[NUM_LEDS];
 
 float ax[2], ay[2], az[2];
 float gx[2], gy[2], gz[2];
+int axRaw[2], ayRaw[2], azRaw[2];
+int gxRaw[2], gyRaw[2], gzRaw[2];
 int mx[2], my[2], mz[2];
+float gxOffset[2], gyOffset[2], gzOffset[2];
+
 volatile uint8_t fReady = 0;
 
 // High precision timer handle
@@ -309,7 +316,6 @@ uint32_t t0, tm;
 //void IRAM_ATTR onTimer(void *arg)
 void IRAM_ATTR onTimer()
 {
-	if (!fRun) return;
 	bool imu_valid[2];
 	// Read and validate IMU data
 	for (uint8_t i = 0; i < 2; i++){
@@ -318,22 +324,31 @@ void IRAM_ATTR onTimer()
 		else {
 			// Process IMU data
 			// BMNM150 : +-1300uT(x/y), +-2500uT(z) (typ)
+			axRaw[i] = conv_value(buf[ 9], buf[ 8]);
+			ayRaw[i] = conv_value(buf[11], buf[10]);
+			azRaw[i] = conv_value(buf[13], buf[12]);
+			gxRaw[i] = conv_value(buf[15], buf[14]);
+			gyRaw[i] = conv_value(buf[17], buf[16]);
+			gzRaw[i] = conv_value(buf[19], buf[18]);
+			ax[i] = (float)axRaw[i] / 16384.0f; // [g]
+			ay[i] = (float)ayRaw[i] / 16384.0f;
+			az[i] = (float)azRaw[i] / 16384.0f;
+			gx[i] = (float)gxRaw[i] / 32768.0f * 2000.0f; // [dps]
+			gy[i] = (float)gyRaw[i] / 32768.0f * 2000.0f;
+			gz[i] = (float)gzRaw[i] / 32768.0f * 2000.0f;
 			mx[i] = (conv_value(buf[1], buf[0]) >> 3); // 13bit (+-4096)
 			my[i] = (conv_value(buf[3], buf[2]) >> 3); // 13bit (+-4096)
 			mz[i] = (conv_value(buf[5], buf[4]) >> 1); // 15bit (+-16384)
-			ax[i] = (float)conv_value(buf[ 9], buf[ 8]) / 16384.0f; // [g]
-			ay[i] = (float)conv_value(buf[11], buf[10]) / 16384.0f;
-			az[i] = (float)conv_value(buf[13], buf[12]) / 16384.0f;
-			gx[i] = (float)conv_value(buf[15], buf[14]) / 32768.0f * 2000.0f; // [dps]
-			gy[i] = (float)conv_value(buf[17], buf[16]) / 32768.0f * 2000.0f;
-			gz[i] = (float)conv_value(buf[19], buf[18]) / 32768.0f * 2000.0f;
+		}
 /*
 			// Validate sensor data
 			if (!is_acc_valid(ax[i], ay[i], az[i]) ||
 				!is_gyro_valid(gx[i], gy[i], gz[i]) ||
 				!is_mag_valid(mx[i], my[i], mz[i])) imu_valid[i] = false;
 */
-		}
+		gx[i] -= gxOffset[i];
+		gy[i] -= gyOffset[i];
+		gz[i] -= gzOffset[i];
 	}
 	fReady = 1;
 }
@@ -343,8 +358,7 @@ void setMeasure(uint8_t f)
 //	printf("mode=%d\n", f);
 	if (f == 1 || f == 3)
 	{
-//		if (f == 1) leds[0] = CRGB(30, 30, 0); // yellow, running
-		if (f == 1) leds[0] = CRGB(50, 10, 0); // orange, calibrating before run
+		if (f == 1) leds[0] = CRGB(30, 30, 0); // yellow, running
 		else if (f == 3) leds[0] = CRGB(30, 0, 30); // purple, calibration
 		ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTimer);
 	}
@@ -380,10 +394,12 @@ void setup()
 	FastLED.setBrightness(128);
 	FastLED.clear();
 
+	fRun = 0;
+/*
 	M5.update();
 	if (M5.BtnA.isPressed())
 	{
-		fRun = 2; // calibration mode (idle)
+		fRun = 2; // mag calibration mode (idle)
 	}
 	else{
 		fRun = 0; // measurement mode (idle)
@@ -400,45 +416,43 @@ void setup()
 			}
 		}
 	}
-
+*/
 	// IMUの初期化（エラーチェック付き）
 	leds[0] = CRGB(30, 0, 0); // 初期化中は赤
 	FastLED.show();
 
-	int result;
 	while(IMUinit(I2C_ADDR_IMU0) != BMI270_OK) delay(10);
 	while(IMUinit(I2C_ADDR_IMU1) != BMI270_OK) delay(10);
-/*
-	if (result != BMI270_OK)
-	{
-		while (1)
-		{
-			leds[0] = CRGB::Red; FastLED.show(); delay(200);
-			leds[0] = CRGB::Black; FastLED.show(); delay(200);
+
+//	M5.update(); while(!M5.BtnA.isPressed()) M5.update();
+
+	leds[0] = CRGB(50, 30, 0); // orange, calibrating before run
+	FastLED.show();
+
+	long gxSum[2], gySum[2], gzSum[2];
+	#define N_SAMPLE_INIT (SAMPLE_FREQ * 4)
+	for (uint8_t i = 0; i < 2; i++){
+		gxSum[i] = 0; gySum[i] = 0; gzSum[i] = 0;
+		gxOffset[i] = 0; gyOffset[i] = 0; gzOffset[i] = 0;
+	}
+	ticker.attach_ms((int)(1000 / SAMPLE_FREQ), onTimer);
+	for (uint16_t j = 0; j < N_SAMPLE_INIT; j++){
+		fReady = 0;
+		while(fReady == 0);
+		for (uint8_t i = 0; i < 2; i++){
+			gxSum[i] += gxRaw[i];
+			printf("# %d %d : %d %d \n", i, j, gxRaw[i], gxSum[i]);
+			gySum[i] += gyRaw[i];
+			gzSum[i] += gzRaw[i];
 		}
 	}
-	result = IMUinit(I2C_ADDR_IMU1);
-	if (result != BMI270_OK)
-	{
-		while (1)
-		{
-			leds[0] = CRGB::Yellow; FastLED.show(); delay(200);
-			leds[0] = CRGB::Black; FastLED.show(); delay(200);
-		}
+	ticker.detach();
+	for (uint8_t i = 0; i < 2; i++){
+		gxOffset[i] = (float)(gxSum[i] / N_SAMPLE_INIT) / 32768.0f * 2000.0f; // [dps]
+		gyOffset[i] = (float)(gySum[i] / N_SAMPLE_INIT) / 32768.0f * 2000.0f; // [dps]
+		gzOffset[i] = (float)(gzSum[i] / N_SAMPLE_INIT) / 32768.0f * 2000.0f; // [dps]
+		printf("IMU%d offset: gx=%.3f, gy=%.3f, gz=%.3f\n", i, gxOffset[i], gyOffset[i], gzOffset[i]);
 	}
-*/
-/*
-	// 高精度タイマーの設定（250Hz）
-	esp_timer_create_args_t timer_args = {
-			.callback = onTimer,
-			.arg = NULL,
-			.dispatch_method = ESP_TIMER_TASK,
-			.name = "imu_timer"};
-
-	ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle));
-	ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle, 1000000 / SAMPLE_FREQ)); // マイクロ秒に変換
-*/
-
 	// Madgwickフィルタの初期化
 	mf[0].begin(SAMPLE_FREQ);
 	mf[1].begin(SAMPLE_FREQ);
@@ -540,9 +554,9 @@ void calc_calib()
 	}
 }
 
-uint16_t cntDataReady = 0;
-#define TH_CNT_DATAREADY 1000
-bool fStabilizationFinished = false;
+//uint16_t cntDataReady = 0;
+//#define TH_CNT_DATAREADY 1000
+//bool fStabilizationFinished = false;
 
 void loop()
 {
@@ -556,7 +570,7 @@ void loop()
 						printf("calib[%d]: %.3f %.3f %.3f / %.3f %.3f %.3f\n", i, mx0[i], my0[i], mz0[i], ma[i], mb[i], mc[i]);
 				break;
 			case 1 : fRun = 0; 
-				cntDataReady = 0; fStabilizationFinished = false;
+//				cntDataReady = 0; fStabilizationFinished = false;
 				break;
 			case 2 : fRun = 3; for (uint8_t i = 0; i < 2; i++){ magX[i].clear(); magY[i].clear(); magZ[i].clear();} break;
 			case 3 : fRun = 2; calc_calib(); break;
@@ -607,6 +621,13 @@ void loop()
 			pitch[i] = mf[i].getPitch();
 			yaw[i] = mf[i].getYaw();
 		}
+		printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0] - roll_[0], pitch[0] - pitch_[0], yaw[0] - yaw_[0], roll[1] - roll_[1], pitch[1] - pitch_[1], yaw[1] - yaw_[1]);
+//		printf(">gx0:%f\n>gy0:%f\n>gz0:%f\n", gx[0], gy[0], gz[0]); printf(">gx1:%f\n>gy1:%f\n>gz1:%f\n", gx[1], gy[1], gz[1]);
+//		printf(">r0:%f\n>y0:%f\n>p0:%f\n", roll[0], yaw[0], pitch[0]); printf(">r1:%f\n>y1:%f\n>p1:%f\n", roll[1], yaw[1], pitch[1]);
+//	printf(">ax0:%f\n>ay0:%f\n>az0:%f\n", ax[0], ay[0], az[0]);
+//	printf(">ax1:%f\n>ay1:%f\n>az1:%f\n", ax[1], ay[1], az[1]);
+	}
+/*
 		if (cntDataReady < TH_CNT_DATAREADY){
 			bool fDataReady = true;
 #define TH 3
@@ -665,7 +686,7 @@ void loop()
 				printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0] - roll_[0], pitch[0] - pitch_[0], yaw[0] - yaw_[0], roll[1] - roll_[1], pitch[1] - pitch_[1], yaw[1] - yaw_[1]);
 		}
 	}
-
+*/
 	if (fRun == 3){
 		fReady = 0;
 		while (fReady == 0);
