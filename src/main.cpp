@@ -11,8 +11,8 @@
 
 bool fUse9Axis = false;
 
-// ToDo: wait for stable (Madgwick filter convergence) after starting
-#define WAIT_FOR_STABLE
+// ToDo: wait for stable of Madgwick filter
+//#define WAIT_FOR_STABLE
 
 #define I2C_ADDR_IMU0 0x68	// IMU#0
 #define I2C_ADDR_IMU1 0x69	// IMU#1
@@ -101,8 +101,8 @@ static CRGB leds[NUM_LEDS];
 
 float ax[2], ay[2], az[2];
 float gx[2], gy[2], gz[2];
-int axRaw[2], ayRaw[2], azRaw[2];
-int gxRaw[2], gyRaw[2], gzRaw[2];
+volatile int axRaw[2], ayRaw[2], azRaw[2];
+volatile int gxRaw[2], gyRaw[2], gzRaw[2];
 int mx[2], my[2], mz[2];
 float gxOffset[2], gyOffset[2], gzOffset[2];
 
@@ -441,7 +441,7 @@ void setup()
 		while(fReady == 0);
 		for (uint8_t i = 0; i < 2; i++){
 			gxSum[i] += gxRaw[i];
-			printf("# %d %d : %d %d \n", i, j, gxRaw[i], gxSum[i]);
+//			printf("# %d %d : %d %d \n", i, j, gxRaw[i], gxSum[i]);
 			gySum[i] += gyRaw[i];
 			gzSum[i] += gzRaw[i];
 		}
@@ -451,7 +451,7 @@ void setup()
 		gxOffset[i] = (float)(gxSum[i] / N_SAMPLE_INIT) / 32768.0f * 2000.0f; // [dps]
 		gyOffset[i] = (float)(gySum[i] / N_SAMPLE_INIT) / 32768.0f * 2000.0f; // [dps]
 		gzOffset[i] = (float)(gzSum[i] / N_SAMPLE_INIT) / 32768.0f * 2000.0f; // [dps]
-		printf("IMU%d offset: gx=%.3f, gy=%.3f, gz=%.3f\n", i, gxOffset[i], gyOffset[i], gzOffset[i]);
+//		printf("IMU%d offset: gx=%.3f, gy=%.3f, gz=%.3f\n", i, gxOffset[i], gyOffset[i], gzOffset[i]);
 	}
 	// Madgwickフィルタの初期化
 	mf[0].begin(SAMPLE_FREQ);
@@ -554,9 +554,11 @@ void calc_calib()
 	}
 }
 
-//uint16_t cntDataReady = 0;
-//#define TH_CNT_DATAREADY 1000
-//bool fStabilizationFinished = false;
+#ifdef WAIT_FOR_STABLE
+uint16_t cntDataReady = 0;
+#define TH_CNT_DATAREADY 100
+bool fStabilizationFinished = false;
+#endif
 
 void loop()
 {
@@ -621,71 +623,51 @@ void loop()
 			pitch[i] = mf[i].getPitch();
 			yaw[i] = mf[i].getYaw();
 		}
-		printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0] - roll_[0], pitch[0] - pitch_[0], yaw[0] - yaw_[0], roll[1] - roll_[1], pitch[1] - pitch_[1], yaw[1] - yaw_[1]);
+		printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 //		printf(">gx0:%f\n>gy0:%f\n>gz0:%f\n", gx[0], gy[0], gz[0]); printf(">gx1:%f\n>gy1:%f\n>gz1:%f\n", gx[1], gy[1], gz[1]);
 //		printf(">r0:%f\n>y0:%f\n>p0:%f\n", roll[0], yaw[0], pitch[0]); printf(">r1:%f\n>y1:%f\n>p1:%f\n", roll[1], yaw[1], pitch[1]);
-//	printf(">ax0:%f\n>ay0:%f\n>az0:%f\n", ax[0], ay[0], az[0]);
-//	printf(">ax1:%f\n>ay1:%f\n>az1:%f\n", ax[1], ay[1], az[1]);
+//	printf(">ax0:%f\n>ay0:%f\n>az0:%f\n", ax[0], ay[0], az[0]); printf(">ax1:%f\n>ay1:%f\n>az1:%f\n", ax[1], ay[1], az[1]);
 	}
 /*
-		if (cntDataReady < TH_CNT_DATAREADY){
-			bool fDataReady = true;
+	if (cntDataReady < TH_CNT_DATAREADY){
+		bool fDataReady = true;
 #define TH 3
-			for (uint8_t i = 0; i < 2; i++){
-				if (abs(roll[i] - roll0[i] > TH)) fDataReady = false;
-				if (abs(yaw[i] - yaw0[i] > TH)) fDataReady = false;
-				if (abs(pitch[i] - pitch0[i] > TH)) fDataReady = false;
-			}
-			if (fDataReady == true){
-				cntDataReady++;
-				if (cntDataReady >= TH_CNT_DATAREADY){
-					 fStabilizationFinished = true;
-					leds[0] = CRGB(30, 30, 0); FastLED.show();
-					for (uint8_t i = 0; i < 2; i++){
-						roll_[i] = roll[i];
-						pitch_[i] = pitch[i];
-						yaw_[i] = yaw[i];
-					}
+		for (uint8_t i = 0; i < 2; i++){
+			if (abs(roll[i] - roll0[i] > TH)) fDataReady = false;
+			if (abs(yaw[i] - yaw0[i] > TH)) fDataReady = false;
+			if (abs(pitch[i] - pitch0[i] > TH)) fDataReady = false;
+		}
+		if (fDataReady == true){
+			cntDataReady++;
+			if (cntDataReady >= TH_CNT_DATAREADY){
+				 fStabilizationFinished = true;
+				leds[0] = CRGB(30, 30, 0); FastLED.show();
+				for (uint8_t i = 0; i < 2; i++){
+					roll_[i] = roll[i];
+					pitch_[i] = pitch[i];
+					yaw_[i] = yaw[i];
 				}
 			}
-			else{
-				cntDataReady = 0;
-			}
-			for (uint8_t i = 0; i < 2; i++){
-				roll0[i] = roll[i];
-				pitch0[i] = pitch[i];
-				yaw0[i] = yaw[i];
-			}
 		}
+		else{
+			cntDataReady = 0;
+		}
+		for (uint8_t i = 0; i < 2; i++){
+			roll0[i] = roll[i];
 
+			pitch0[i] = pitch[i];
+			yaw0[i] = yaw[i];
+		}
+	}
 		if (fStabilizationFinished == true){
 //		printf(">fmx0:%f\n>fmy0:%f\n>fmz0:%f\n", fmx[0], fmy[0], fmz[0]);
 //		printf(">fmx1:%f\n>fmy1:%f\n>fmz1:%f\n", fmx[1], fmy[1], fmz[1]);
-
-//		printf(">gx0:%f\n>gy0:%f\n>gz0:%f\n", gx[0], gy[0], gz[0]);
-//		printf(">ax0:%f\n>ay0:%f\n>az0:%f\n", ax[0], ay[0], az[0]);
-//		printf(">gx1:%f\n>gy1:%f\n>gz1:%f\n", gx[1], gy[1], gz[1]);
-//		printf(">ax1:%f\n>ay1:%f\n>az1:%f\n", ax[1], ay[1], az[1]);
-//		printf(">r0-r1:%f\n>y0-y1:%f\n>p0-p1:%f\n", roll[0]-roll[1], yaw[0]-yaw[1], pitch[0]-pitch[1]);
-		//printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
-		//printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], ax[1], ay[1], az[1]);
-		///printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, gx[0], gy[0], gz[0], gx[1], gy[1], gz[1]);
-		//printf("%d,%f,%f,%f\n", tm, gx[0], gy[0], gz[0]);
-		//printf("%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n",tm, mx[0], my[0], mz[0], mx[1], my[1], mz[1]);
-//		printf(">mx0:%f\n>my0:%f\n>mz0:%f\n", mx[0], my[0], mz[0]);
-		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, ax[0], ay[0], az[0], roll[0], pitch[0], yaw[0]);
-		//printf("%d,%.3f,%.3f,%.3f , %.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-		//printf("Orientation: %.3f %.3f %.3f %.3f %.3f %.3f\n", roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-		//printf("Dir: %d %.3f %.3f %.3f %.3f %.3f %.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-//		printf("Dir:,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-
+//		printf(">gx0:%f\n>gy0:%f\n>gz0:%f\n", gx[0], gy[0], gz[0]); printf(">ax0:%f\n>ay0:%f\n>az0:%f\n", ax[0], ay[0], az[0]);
+//		printf(">gx1:%f\n>gy1:%f\n>gz1:%f\n", gx[1], gy[1], gz[1]); printf(">ax1:%f\n>ay1:%f\n>az1:%f\n", ax[1], ay[1], az[1]);
 //		printf(">r0:%f\n>y0:%f\n>p0:%f\n", roll[0], yaw[0], pitch[0]);
 //		printf(">r1:%f\n>y1:%f\n>p1:%f\n", roll[1], yaw[1], pitch[1]);
-
-				//printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
-				printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0] - roll_[0], pitch[0] - pitch_[0], yaw[0] - yaw_[0], roll[1] - roll_[1], pitch[1] - pitch_[1], yaw[1] - yaw_[1]);
+//		printf("%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", tm, roll[0], pitch[0], yaw[0], roll[1], pitch[1], yaw[1]);
 		}
-	}
 */
 	if (fRun == 3){
 		fReady = 0;
